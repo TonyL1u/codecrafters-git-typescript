@@ -44,15 +44,16 @@ switch (command) {
 	case GitCommand.HASH_OBJECT: {
 		const [_, __, file] = args;
 		const rawContent = fs.readFileSync(file, 'utf-8');
-		// 1. use crypto to calculate SHA-1 hash
-		const shasum = crypto.createHash('sha1');
-		const hash = shasum.update(rawContent).digest('hex');
+		const packedContent = `blob ${rawContent.length}\0${rawContent}`; // blob <size>\0<content>
 
-		// 2. use zlib to compress the packed content --> blob <size>\0<content>
-		const packedContent = `blob ${rawContent.length}\0${rawContent}`;
+		// 1. use zlib to compress the packed content
 		const compressedContent = zlib
 			.deflateSync(packedContent)
 			.toString('base64');
+
+		// 2. use crypto to calculate SHA-1 hash
+		const shasum = crypto.createHash('sha1');
+		const hash = shasum.update(packedContent).digest('hex');
 
 		// 3. write compressed content to .git/objects
 		const dir = hash.slice(0, 2);
