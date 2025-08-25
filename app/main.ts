@@ -32,7 +32,7 @@ switch (command) {
 			}
 			const [_, content] = buf.toString().split('\0');
 
-			console.log(content.trim().replaceAll('\n', ''));
+			console.log(content.length);
 		});
 		break;
 	default:
