@@ -32,7 +32,7 @@ switch (command) {
 			}
 			const [_, content] = buf.toString().split('\0');
 
-			console.table(content);
+			process.stdout.write(content);
 		});
 		break;
 	default:
