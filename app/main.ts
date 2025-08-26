@@ -106,7 +106,7 @@ switch (command) {
 
 				if (isDirectory) {
 					const { hash } = iterate(file);
-					entries.unshift({
+					entries.push({
 						mode: UnixFileMode.DIR,
 						name: path.basename(file),
 						hash
@@ -122,8 +122,11 @@ switch (command) {
 					});
 				}
 			});
-			const { compressed, hash } = createTreeObject(entries);
-
+			// sort the entries alphabetically
+			const sortedEntries = entries.toSorted((a, b) =>
+				a.name.localeCompare(b.name)
+			);
+			const { compressed, hash } = createTreeObject(sortedEntries);
 			// write compressed content to .git/objects
 			writeGitObjects(compressed, hash);
 
