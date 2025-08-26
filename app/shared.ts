@@ -11,7 +11,7 @@ export function readGitObjects(hash: string) {
 	const blob = hash.slice(2);
 	const buffer = fs.readFileSync(path.resolve('.git/objects', dir, blob));
 
-	return zlib.unzipSync(new Uint8Array(buffer));
+	return zlib.unzipSync(buffer);
 }
 
 export function writeGitObjects(buffer: Buffer, hash: string) {
@@ -25,10 +25,6 @@ export function writeGitObjects(buffer: Buffer, hash: string) {
 	}
 
 	if (!fs.existsSync(blobPath)) {
-		fs.writeFileSync(blobPath, new Uint8Array(buffer));
+		fs.writeFileSync(blobPath, buffer);
 	}
-}
-
-export function concatBuffer(...buffers: Buffer[]) {
-	return Buffer.concat(buffers.map((buf) => new Uint8Array(buf)));
 }
