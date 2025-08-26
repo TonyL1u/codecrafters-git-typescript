@@ -193,7 +193,7 @@ function createTreeObject(entries: TreeObjectEntry[]) {
 	// 1. generate tree parts
 	const parts = entries.map(({ mode, name, hash }) => {
 		const foreBuffer = new Uint8Array(Buffer.from(`${mode} ${name}\0`));
-		const hashBuffer = stringHexToBinary(hash);
+		const hashBuffer = new Uint8Array(Buffer.from(hash, 'hex'));
 
 		return new Uint8Array(Buffer.concat([foreBuffer, hashBuffer]));
 	});
@@ -220,17 +220,6 @@ function readUnit8ArrayFileSync(file: string) {
 	const buffer = fs.readFileSync(file);
 
 	return new Uint8Array(buffer.buffer);
-}
-
-function stringHexToBinary(hex: string) {
-	const buffer = new ArrayBuffer(20);
-	const view = new DataView(buffer);
-
-	for (let i = 0; i < 20; i++) {
-		view.setUint8(i, parseInt(hex.slice(i * 2, i * 2 + 2), 16));
-	}
-
-	return new Uint8Array(buffer);
 }
 
 function traverseDirs(
