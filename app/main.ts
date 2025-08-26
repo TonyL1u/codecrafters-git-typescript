@@ -47,7 +47,7 @@ switch (command) {
 	case GitCommand.CAT_FILE: {
 		const [_, __, hash] = args;
 		const buf = readGitObjects(hash);
-		print(buf.toString('utf-8', buf.indexOf(0x00)));
+		print(buf.toString('utf-8', buf.indexOf(0x00) + 1));
 		break;
 	}
 	case GitCommand.HASH_OBJECT: {
