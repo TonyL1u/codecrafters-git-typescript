@@ -5,13 +5,18 @@ import * as crypto from 'node:crypto';
 
 const args = process.argv.slice(2);
 const command = args[0];
+const FAKE_GIT_USER = {
+	name: 'your_nickname',
+	email: 'your_email@some.com'
+};
 
 enum GitCommand {
 	INIT = 'init',
 	CAT_FILE = 'cat-file',
 	HASH_OBJECT = 'hash-object',
 	LS_TREE = 'ls-tree',
-	WRITE_TREE = 'write-tree'
+	WRITE_TREE = 'write-tree',
+	COMMIT_TREE = 'commit-tree'
 }
 
 enum GitObjectType {
@@ -30,6 +35,20 @@ interface TreeObjectEntry {
 	mode: UnixFileMode;
 	name: string;
 	hash: string;
+}
+
+interface GitUser {
+	name: string;
+	email: string;
+}
+
+interface CommitInfo {
+	tree: string;
+	parent: string;
+	author: GitUser;
+	committer: GitUser;
+	date: Date;
+	message: string;
 }
 
 switch (command) {
@@ -138,7 +157,21 @@ switch (command) {
 
 		break;
 	}
-
+	case GitCommand.COMMIT_TREE: {
+		const [_, treeHash, __, commitHash, ___, commitMsg] = args;
+		const { compressed, hash } = createCommitObject({
+			tree: treeHash,
+			parent: commitHash,
+			author: FAKE_GIT_USER,
+			committer: FAKE_GIT_USER,
+			date: new Date(),
+			message: commitMsg
+		});
+		// write compressed content to .git/objects
+		writeGitObjects(compressed, hash);
+		print(hash);
+		break;
+	}
 	default:
 		throw new Error(`Unknown command ${command}`);
 }
@@ -150,11 +183,9 @@ function print(str: string) {
 function readGitObjects(hash: string) {
 	const dir = hash.slice(0, 2);
 	const blob = hash.slice(2);
-	const buffer = readUnit8ArrayFileSync(
-		path.resolve('.git/objects', dir, blob)
-	);
+	const buffer = fs.readFileSync(path.resolve('.git/objects', dir, blob));
 
-	return zlib.unzipSync(buffer);
+	return zlib.unzipSync(new Uint8Array(buffer));
 }
 
 function writeGitObjects(content: Uint8Array, hash: string) {
@@ -174,10 +205,9 @@ function writeGitObjects(content: Uint8Array, hash: string) {
 
 function createBlobObject(file: string) {
 	// 1. pack content with "blob <size>\0"
-	const raw = readUnit8ArrayFileSync(file);
+	const raw = fs.readFileSync(file);
 	const header = Buffer.from(`blob ${raw.length}\0`);
-	const buffer = Buffer.concat([new Uint8Array(header.buffer), raw]);
-	const packed = new Uint8Array(buffer.buffer);
+	const packed = new Uint8Array(concatBuffer(header, raw));
 
 	// 2. use zlib to compress the packed content
 	const compressed = new Uint8Array(zlib.deflateSync(packed));
@@ -192,10 +222,10 @@ function createBlobObject(file: string) {
 function createTreeObject(entries: TreeObjectEntry[]) {
 	// 1. generate tree parts
 	const parts = entries.map(({ mode, name, hash }) => {
-		const foreBuffer = new Uint8Array(Buffer.from(`${mode} ${name}\0`));
-		const hashBuffer = new Uint8Array(Buffer.from(hash, 'hex'));
-
-		return new Uint8Array(Buffer.concat([foreBuffer, hashBuffer]));
+		return concatBuffer(
+			Buffer.from(`${mode} ${name}\0`),
+			Buffer.from(hash, 'hex')
+		);
 	});
 
 	// 2. calculate tree size
@@ -203,8 +233,7 @@ function createTreeObject(entries: TreeObjectEntry[]) {
 	const header = Buffer.from(`tree ${size}\0`);
 
 	// 3. pack the entire tree
-	const buffer = Buffer.concat([new Uint8Array(header.buffer), ...parts]);
-	const packed = new Uint8Array(buffer.buffer);
+	const packed = new Uint8Array(concatBuffer(header, ...parts));
 
 	// 4. use zlib to compress the packed content
 	const compressed = new Uint8Array(zlib.deflateSync(packed));
@@ -216,10 +245,32 @@ function createTreeObject(entries: TreeObjectEntry[]) {
 	return { packed, compressed, hash };
 }
 
-function readUnit8ArrayFileSync(file: string) {
-	const buffer = fs.readFileSync(file);
+function createCommitObject(info: CommitInfo) {
+	// 1. extract & pack commit info
+	const { tree, parent, author, committer, date, message } = info;
+	const raw = Buffer.from(
+		`tree ${tree}
+parent ${parent}
+author ${author.name} <${author.email}> ${formatTime(date)}
+committer ${committer.name} <${committer.email}> ${formatTime(date)}
 
-	return new Uint8Array(buffer.buffer);
+${message}\n`
+	);
+	const header = Buffer.from(`commit ${raw.length}\0`);
+	const packed = new Uint8Array(concatBuffer(header, raw));
+
+	// 2. use zlib to compress the packed content
+	const compressed = new Uint8Array(zlib.deflateSync(packed));
+
+	// 3. use crypto to calculate SHA-1 hash
+	const shasum = crypto.createHash('sha1');
+	const hash = shasum.update(packed).digest('hex');
+
+	return { packed, compressed, hash };
+}
+
+function concatBuffer(...buffers: Buffer[]) {
+	return Buffer.concat(buffers.map((buf) => new Uint8Array(buf)));
 }
 
 function traverseDirs(
@@ -234,4 +285,20 @@ function traverseDirs(
 		const isDirectory = stat.isDirectory();
 		cb?.(fullPath, isDirectory);
 	}
+}
+
+function formatTime(date: Date) {
+	const timestamp = Math.floor(date.getTime() / 1000);
+
+	const offset = date.getTimezoneOffset();
+	const offsetHours = Math.floor(Math.abs(offset) / 60);
+	const offsetMinutes = Math.abs(offset) % 60;
+	const sign = offset > 0 ? '-' : '+';
+
+	const offsetFormatted = `${sign}${String(offsetHours).padStart(
+		2,
+		'0'
+	)}${String(offsetMinutes).padStart(2, '0')}`;
+
+	return `${timestamp} ${offsetFormatted}`;
 }
