@@ -10,7 +10,8 @@ enum GitCommand {
 	INIT = 'init',
 	CAT_FILE = 'cat-file',
 	HASH_OBJECT = 'hash-object',
-	LS_TREE = 'ls-tree'
+	LS_TREE = 'ls-tree',
+	WRITE_TREE = 'write-tree'
 }
 
 enum GitObjectType {
@@ -23,6 +24,12 @@ enum UnixFileMode {
 	EXECUTABLE_FILE = 100755,
 	SYMBOLIC_LINK = 120000,
 	DIR = 40000
+}
+
+interface TreeObjectEntry {
+	mode: UnixFileMode;
+	name: string;
+	hash: string;
 }
 
 switch (command) {
@@ -39,38 +46,19 @@ switch (command) {
 		break;
 	case GitCommand.CAT_FILE: {
 		const [_, __, hash] = args;
-		const str = readGitObjects(hash).toString();
-		print(str.split('\0')[1]);
+		const buf = readGitObjects(hash);
+		print(buf.toString('utf-8', buf.indexOf(0x00)));
 		break;
 	}
 	case GitCommand.HASH_OBJECT: {
 		const [_, __, file] = args;
-		const rawContent = fs.readFileSync(file, 'utf-8');
-		const packedContent = `blob ${rawContent.length}\0${rawContent}`; // blob <size>\0<content>
-
-		// 1. use zlib to compress the packed content
-		const compressedContent = zlib
-			.deflateSync(packedContent)
-			.toString('base64');
-
-		// 2. use crypto to calculate SHA-1 hash
-		const shasum = crypto.createHash('sha1');
-		const hash = shasum.update(packedContent).digest('hex');
-
-		// 3. write compressed content to .git/objects
-		const dir = hash.slice(0, 2);
-		const blob = hash.slice(2);
-		fs.mkdirSync(path.resolve('.git/objects', dir));
-		fs.writeFileSync(
-			path.resolve('.git/objects', dir, blob),
-			compressedContent,
-			'base64'
-		);
-
+		const { compressed, hash } = createBlobObject(file);
+		// write compressed content to .git/objects
+		writeGitObjects(compressed, hash);
 		print(hash);
 		break;
 	}
-	case GitCommand.LS_TREE:
+	case GitCommand.LS_TREE: {
 		const [_, flag, hash] = args;
 		const buf = readGitObjects(hash);
 		let offset = 0;
@@ -85,9 +73,9 @@ switch (command) {
 			const nameEnd = buf.indexOf(0x00, modeEnd);
 			const name = buf.toString('utf-8', nameStart, nameEnd);
 
-			// 3. search SHA-1 hash
+			// 3. search SHA-1 hash (20 bytes)
 			const hashStart = nameEnd + 1;
-			const hashEnd = hashStart + 21;
+			const hashEnd = hashStart + 20;
 			const hash = buf.toString('hex', hashStart, hashEnd);
 
 			if (mode === 'tree') {
@@ -102,26 +90,156 @@ switch (command) {
 					+mode === UnixFileMode.DIR
 						? GitObjectType.TREE
 						: GitObjectType.BLOB;
-				print(`${mode} ${objectType} ${hash} ${name}`);
+				print(`${mode} ${objectType} ${hash} ${name}\n`);
 			}
 
 			offset = hashEnd;
 		}
+		break;
+	}
+	case GitCommand.WRITE_TREE: {
+		const iterate = (entry = '.') => {
+			const entries: TreeObjectEntry[] = [];
+
+			traverseDirs(entry, (file, isDirectory) => {
+				if (isDirectory && file.startsWith('.git')) return;
+
+				if (isDirectory) {
+					const { hash } = iterate(file);
+					entries.unshift({
+						mode: UnixFileMode.DIR,
+						name: path.basename(file),
+						hash
+					});
+				} else {
+					const { compressed, hash } = createBlobObject(file);
+					// write compressed content to .git/objects
+					writeGitObjects(compressed, hash);
+					entries.push({
+						mode: UnixFileMode.REGULAR_FILE,
+						name: path.basename(file),
+						hash
+					});
+				}
+			});
+			const { compressed, hash } = createTreeObject(entries);
+
+			// write compressed content to .git/objects
+			writeGitObjects(compressed, hash);
+
+			return { hash };
+		};
+
+		const { hash } = iterate();
+		print(hash);
 
 		break;
+	}
+
 	default:
 		throw new Error(`Unknown command ${command}`);
+}
+
+function print(str: string) {
+	return process.stdout.write(str, 'utf-8');
 }
 
 function readGitObjects(hash: string) {
 	const dir = hash.slice(0, 2);
 	const blob = hash.slice(2);
-	const buffer = fs.readFileSync(path.resolve('.git/objects', dir, blob));
+	const buffer = readUnit8ArrayFileSync(
+		path.resolve('.git/objects', dir, blob)
+	);
 
-	// @ts-ignore
 	return zlib.unzipSync(buffer);
 }
 
-function print(str: string) {
-	return process.stdout.write(str, 'utf-8');
+function writeGitObjects(content: Uint8Array, hash: string) {
+	const dir = hash.slice(0, 2);
+	const blob = hash.slice(2);
+	const dirPath = path.resolve('.git/objects', dir);
+	const blobPath = path.resolve(dirPath, blob);
+
+	if (!fs.existsSync(dirPath)) {
+		fs.mkdirSync(dirPath);
+	}
+
+	if (!fs.existsSync(blobPath)) {
+		fs.writeFileSync(blobPath, content);
+	}
+}
+
+function createBlobObject(file: string) {
+	// 1. pack content with "blob <size>\0"
+	const raw = readUnit8ArrayFileSync(file);
+	const header = Buffer.from(`blob ${raw.length}\0`);
+	const buffer = Buffer.concat([new Uint8Array(header.buffer), raw]);
+	const packed = new Uint8Array(buffer.buffer);
+
+	// 2. use zlib to compress the packed content
+	const compressed = new Uint8Array(zlib.deflateSync(packed));
+
+	// 3. use crypto to calculate SHA-1 hash
+	const shasum = crypto.createHash('sha1');
+	const hash = shasum.update(packed).digest('hex');
+
+	return { packed, compressed, hash };
+}
+
+function createTreeObject(entries: TreeObjectEntry[]) {
+	// 1. generate tree parts
+	const parts = entries.map(({ mode, name, hash }) => {
+		const foreBuffer = new Uint8Array(Buffer.from(`${mode} ${name}\0`));
+		const hashBuffer = stringHexToBinary(hash);
+
+		return new Uint8Array(Buffer.concat([foreBuffer, hashBuffer]));
+	});
+
+	// 2. calculate tree size
+	const size = parts.map((part) => part.length).reduce((a, b) => a + b);
+	const header = Buffer.from(`tree ${size}\0`);
+
+	// 3. pack the entire tree
+	const buffer = Buffer.concat([new Uint8Array(header.buffer), ...parts]);
+	const packed = new Uint8Array(buffer.buffer);
+
+	// 4. use zlib to compress the packed content
+	const compressed = new Uint8Array(zlib.deflateSync(packed));
+
+	// 5. use crypto to calculate SHA-1 hash
+	const shasum = crypto.createHash('sha1');
+	const hash = shasum.update(packed).digest('hex');
+
+	return { packed, compressed, hash };
+}
+
+function readUnit8ArrayFileSync(file: string) {
+	const buffer = fs.readFileSync(file);
+
+	return new Uint8Array(buffer.buffer);
+}
+
+function stringHexToBinary(hex: string) {
+	const buffer = new ArrayBuffer(20);
+	const view = new DataView(buffer);
+
+	for (let i = 0; i < 20; i++) {
+		view.setUint8(i, parseInt(hex.slice(i * 2, i * 2 + 2), 16));
+	}
+
+	return new Uint8Array(buffer);
+}
+
+function traverseDirs(
+	entry: string,
+	cb?: (entry: string, isDirectory: boolean) => void
+) {
+	const dirs = fs.readdirSync(entry);
+
+	for (const dir of dirs) {
+		const fullPath = path.join(entry, dir);
+		const stat = fs.statSync(fullPath);
+		const isDirectory = stat.isDirectory();
+		cb?.(fullPath, isDirectory);
+	}
 }
