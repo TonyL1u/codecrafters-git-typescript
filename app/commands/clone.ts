@@ -1,3 +1,4 @@
+import * as path from 'node:path';
 import * as fs from 'node:fs';
 import * as zlib from 'node:zlib';
 
@@ -13,7 +14,6 @@ import {
 	GitObjectTypeEnum,
 	UnixFileModeEnum
 } from '../types';
-import path from 'node:path';
 
 const args = process.argv.slice(2);
 
