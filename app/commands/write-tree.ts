@@ -5,45 +5,35 @@ import { createBlobObject, createTreeObject } from '../create';
 import { writeGitObjects, print } from '../shared';
 import { UnixFileModeEnum, type TreeObjectEntry } from '../types';
 
-const traverseDirs = (
-	entry: string,
-	cb?: (entry: string, isDirectory: boolean) => void
-) => {
-	const dirs = fs.readdirSync(entry);
-
-	for (const dir of dirs) {
-		const fullPath = path.join(entry, dir);
-		const stat = fs.statSync(fullPath);
-		const isDirectory = stat.isDirectory();
-		cb?.(fullPath, isDirectory);
-	}
-};
-
 export function WriteTree() {
 	const iterate = (entry = '.') => {
 		const entries: TreeObjectEntry[] = [];
+		const dirs = fs.readdirSync(entry);
+		for (const dir of dirs) {
+			const fullPath = path.join(entry, dir);
+			const stat = fs.statSync(fullPath);
+			const isDirectory = stat.isDirectory();
 
-		traverseDirs(entry, (file, isDirectory) => {
-			if (isDirectory && file.startsWith('.git')) return;
+			if (isDirectory && fullPath.startsWith('.git')) continue;
 
 			if (isDirectory) {
-				const { hash } = iterate(file);
+				const { hash } = iterate(fullPath);
 				entries.push({
 					mode: UnixFileModeEnum.DIR,
-					name: path.basename(file),
+					name: path.basename(fullPath),
 					hash
 				});
 			} else {
-				const { compressed, hash } = createBlobObject(file);
+				const { compressed, hash } = createBlobObject(fullPath);
 				// write compressed content to .git/objects
 				writeGitObjects(compressed, hash);
 				entries.push({
 					mode: UnixFileModeEnum.REGULAR_FILE,
-					name: path.basename(file),
+					name: path.basename(fullPath),
 					hash
 				});
 			}
-		});
+		}
 		// sort the entries alphabetically
 		const sortedEntries = entries.toSorted((a, b) =>
 			a.name.localeCompare(b.name)
