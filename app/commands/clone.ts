@@ -249,14 +249,14 @@ class RefDelta {
 	 * @see https://stefan.saasen.me/articles/git-clone-in-haskell-from-the-bottom-up/#format-of-the-delta-representation
 	 */
 	#deltaEncoding(curByte: number, mask: number[]) {
-		let count = 0;
+		let value = 0;
 		mask.forEach((seed, index) => {
 			if ((curByte & seed) !== 0) {
-				count |= this.#deltaBuffer[++this.#offset] << (index * 8);
+				value |= this.#deltaBuffer[++this.#offset] << (index * 8);
 			}
 		});
 
-		return count;
+		return value;
 	}
 
 	#writeToTarget(
