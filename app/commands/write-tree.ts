@@ -3,8 +3,7 @@ import * as path from 'node:path';
 
 import { createBlobObject, createTreeObject } from '../create';
 import { writeGitObjects, print } from '../shared';
-import type { TreeObjectEntry } from '../types';
-import { UnixFileMode } from '../types';
+import { UnixFileModeEnum, type TreeObjectEntry } from '../types';
 
 const traverseDirs = (
 	entry: string,
@@ -30,7 +29,7 @@ export function WriteTree() {
 			if (isDirectory) {
 				const { hash } = iterate(file);
 				entries.push({
-					mode: UnixFileMode.DIR,
+					mode: UnixFileModeEnum.DIR,
 					name: path.basename(file),
 					hash
 				});
@@ -39,7 +38,7 @@ export function WriteTree() {
 				// write compressed content to .git/objects
 				writeGitObjects(compressed, hash);
 				entries.push({
-					mode: UnixFileMode.REGULAR_FILE,
+					mode: UnixFileModeEnum.REGULAR_FILE,
 					name: path.basename(file),
 					hash
 				});

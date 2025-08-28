@@ -7,9 +7,9 @@ const FAKE_USER = {
 	email: 'your_email@some.com'
 };
 
-const formatTime = (date: Date) => {
+const getCommitTime = () => {
+	const date = new Date(0);
 	const timestamp = Math.floor(date.getTime() / 1000);
-
 	const offset = date.getTimezoneOffset();
 	const offsetHours = Math.floor(Math.abs(offset) / 60);
 	const offsetMinutes = Math.abs(offset) % 60;
@@ -30,7 +30,7 @@ export function CommitTree() {
 		parent: commitHash,
 		author: FAKE_USER,
 		committer: FAKE_USER,
-		time: formatTime(new Date()),
+		time: getCommitTime(),
 		message: commitMsg
 	});
 	// write compressed content to .git/objects
