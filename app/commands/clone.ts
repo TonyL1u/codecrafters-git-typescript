@@ -1,14 +1,9 @@
-import * as path from 'node:path';
 import * as fs from 'node:fs';
+import * as path from 'node:path';
 import * as zlib from 'node:zlib';
 
 import { createRawObject } from '../create';
-import {
-	readGitObjects,
-	readGitCommitObjects,
-	readGitTreeObjects,
-	writeGitObjects
-} from '../shared';
+import { GitObjectReader } from '../shared';
 import {
 	PackFileObjectTypeEnum,
 	GitObjectTypeEnum,
@@ -298,6 +293,7 @@ export async function Clone() {
 	if (!buffer) return;
 
 	const packFile = new PackFile(buffer);
+	const reader = new GitObjectReader(directory);
 	for (const { type, reference, data } of packFile.objects) {
 		switch (type) {
 			case PackFileObjectTypeEnum.COMMIT: {
@@ -306,7 +302,7 @@ export async function Clone() {
 					data
 				);
 
-				writeGitObjects(compressed, hash, directory);
+				reader.write(compressed, hash);
 				break;
 			}
 			case PackFileObjectTypeEnum.TREE: {
@@ -315,7 +311,7 @@ export async function Clone() {
 					data
 				);
 
-				writeGitObjects(compressed, hash, directory);
+				reader.write(compressed, hash);
 				break;
 			}
 			case PackFileObjectTypeEnum.BLOB: {
@@ -324,7 +320,7 @@ export async function Clone() {
 					data
 				);
 
-				writeGitObjects(compressed, hash, directory);
+				reader.write(compressed, hash);
 				break;
 			}
 			case PackFileObjectTypeEnum.TAG:
@@ -334,17 +330,14 @@ export async function Clone() {
 				// TODO
 				break;
 			case PackFileObjectTypeEnum.REF_DELTA: {
-				const { type, buffer: sourceBuffer } = readGitObjects(
-					reference!,
-					directory
-				);
+				const { type, buffer: sourceBuffer } = reader.read(reference!);
 				const { buffer } = new RefDelta(data, sourceBuffer);
 				const { compressed, hash } = createRawObject(
 					Buffer.from(`${type} ${buffer.length}\0`),
 					buffer
 				);
 
-				writeGitObjects(compressed, hash, directory);
+				reader.write(compressed, hash);
 				break;
 			}
 		}
@@ -352,18 +345,18 @@ export async function Clone() {
 
 	const { hash: headHash } = data.find(({ ref }) => ref === HEAD)!;
 	// the HEAD hash indicates a commit tree
-	const { commitInfo } = readGitCommitObjects(headHash, directory);
+	const { commitInfo } = reader.read<GitObjectTypeEnum.COMMIT>(headHash);
 	const iterate = (hash: string, entry: string) => {
 		if (!fs.existsSync(entry)) fs.mkdirSync(entry);
 
-		const { entries } = readGitTreeObjects(hash, directory);
+		const { entries } = reader.read<GitObjectTypeEnum.TREE>(hash);
 		for (const { mode, hash, name } of entries) {
 			const filePath = path.resolve(entry, name);
 			switch (mode) {
 				case UnixFileModeEnum.REGULAR_FILE:
 				case UnixFileModeEnum.EXECUTABLE_FILE:
 				case UnixFileModeEnum.SYMBOLIC_LINK:
-					const { buffer } = readGitObjects(hash, directory);
+					const { buffer } = reader.read(hash);
 					fs.writeFileSync(filePath, buffer, { encoding: 'utf-8' });
 					fs.chmodSync(filePath, parseInt(`${mode}`, 8));
 					break;

@@ -1,5 +1,5 @@
 import { createCommitObject } from '../create';
-import { writeGitObjects, print } from '../shared';
+import { GitObjectReader, print } from '../shared';
 
 const args = process.argv.slice(2);
 const FAKE_USER = {
@@ -25,6 +25,7 @@ const getCommitTime = () => {
 
 export function CommitTree() {
 	const [_, treeHash, __, commitHash, ___, commitMsg] = args;
+	const reader = new GitObjectReader();
 	const { compressed, hash } = createCommitObject({
 		tree: treeHash,
 		parent: commitHash,
@@ -34,6 +35,6 @@ export function CommitTree() {
 		message: commitMsg
 	});
 	// write compressed content to .git/objects
-	writeGitObjects(compressed, hash);
+	reader.write(compressed, hash);
 	print(hash);
 }

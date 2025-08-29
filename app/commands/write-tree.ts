@@ -2,10 +2,11 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 
 import { createBlobObject, createTreeObject } from '../create';
-import { writeGitObjects, print } from '../shared';
+import { GitObjectReader, print } from '../shared';
 import { UnixFileModeEnum, type TreeObjectEntry } from '../types';
 
 export function WriteTree() {
+	const reader = new GitObjectReader();
 	const iterate = (entry = '.') => {
 		const entries: TreeObjectEntry[] = [];
 		const dirs = fs.readdirSync(entry);
@@ -26,7 +27,7 @@ export function WriteTree() {
 			} else {
 				const { compressed, hash } = createBlobObject(fullPath);
 				// write compressed content to .git/objects
-				writeGitObjects(compressed, hash);
+				reader.write(compressed, hash);
 				entries.push({
 					mode: UnixFileModeEnum.REGULAR_FILE,
 					name: path.basename(fullPath),
@@ -40,7 +41,7 @@ export function WriteTree() {
 		);
 		const { compressed, hash } = createTreeObject(sortedEntries);
 		// write compressed content to .git/objects
-		writeGitObjects(compressed, hash);
+		reader.write(compressed, hash);
 
 		return { hash };
 	};
